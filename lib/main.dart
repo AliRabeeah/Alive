@@ -1,12 +1,58 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import 'theme/app_theme_provider.dart';
 import 'theme/app_state_provider.dart';
 import 'screens/home_screen.dart';
 
+/// يلتقط أي خطأ يحدث أثناء بدء التشغيل أو أثناء التشغيل ويعرضه على الشاشة
+/// بدل ترك المستخدم أمام شاشة فارغة بدون أي تفسير.
+String? _fatalError;
+
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(const AliveApp());
+  runZonedGuarded(() {
+    WidgetsFlutterBinding.ensureInitialized();
+    FlutterError.onError = (FlutterErrorDetails details) {
+      _fatalError = details.exceptionAsString();
+      FlutterError.presentError(details);
+    };
+    runApp(const AliveApp());
+  }, (error, stack) {
+    _fatalError = error.toString();
+    // أعد رسم التطبيق بعرض الخطأ إن كان قد بدأ التشغيل فعلاً
+    runApp(_ErrorApp(message: _fatalError!));
+  });
+}
+
+class _ErrorApp extends StatelessWidget {
+  final String message;
+  const _ErrorApp({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('حدث خطأ عند بدء التشغيل', style: TextStyle(color: Colors.orange, fontSize: 20, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 16),
+                  Text(message, style: const TextStyle(color: Colors.white, fontSize: 13)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class AliveApp extends StatefulWidget {
@@ -20,6 +66,7 @@ class _AliveAppState extends State<AliveApp> {
   final themeProvider = AppThemeProvider();
   final appStateProvider = AppStateProvider();
   bool _ready = false;
+  String? _error;
 
   @override
   void initState() {
@@ -28,13 +75,21 @@ class _AliveAppState extends State<AliveApp> {
   }
 
   Future<void> _bootstrap() async {
-    await themeProvider.load();
-    await appStateProvider.refresh();
-    setState(() => _ready = true);
+    try {
+      await themeProvider.load();
+      await appStateProvider.refresh();
+      if (mounted) setState(() => _ready = true);
+    } catch (e, st) {
+      debugPrint('Bootstrap error: $e\n$st');
+      if (mounted) setState(() => _error = e.toString());
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_error != null) {
+      return _ErrorApp(message: _error!);
+    }
     if (!_ready) {
       return const MaterialApp(
         debugShowCheckedModeBanner: false,
