@@ -1,0 +1,91 @@
+name: Build Alive APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Ensure Android platform scaffold exists
+        run: |
+          if [ ! -d "android" ]; then
+            flutter create --platforms=android --org com.alihalim --project-name alive .
+          fi
+
+      - name: Patch AndroidManifest (label + internet permission)
+        run: python3 tools/patch_manifest.py
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
+      - name: Build release APK (unsigned)
+        run: flutter build apk --release
+
+      - name: Decode keystore
+        if: ${{ secrets.ALIVE_KEYSTORE_BASE64 != '' }}
+        run: |
+          echo "${{ secrets.ALIVE_KEYSTORE_BASE64 }}" | base64 --decode > alive_release.keystore
+
+      - name: Sign APK
+        if: ${{ secrets.ALIVE_KEYSTORE_BASE64 != '' }}
+        env:
+          KEYSTORE_PASS: ${{ secrets.ALIVE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ALIVE_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ALIVE_KEY_PASSWORD }}
+        run: |
+          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -n 1)
+          UNSIGNED=build/app/outputs/flutter-apk/app-release.apk
+          ALIGNED=build/app/outputs/flutter-apk/app-release-aligned.apk
+          SIGNED=build/app/outputs/flutter-apk/Alive-signed.apk
+          $BUILD_TOOLS/zipalign -f -v 4 $UNSIGNED $ALIGNED
+          $BUILD_TOOLS/apksigner sign \
+            --ks alive_release.keystore \
+            --ks-pass pass:$KEYSTORE_PASS \
+            --ks-key-alias $KEY_ALIAS \
+            --key-pass pass:$KEY_PASS \
+            --out $SIGNED \
+            $ALIGNED
+          mv $SIGNED build/app/outputs/flutter-apk/Alive.apk
+
+      - name: Rename unsigned APK (fallback, no keystore configured)
+        if: ${{ secrets.ALIVE_KEYSTORE_BASE64 == '' }}
+        run: mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/Alive.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Alive-apk
+          path: build/app/outputs/flutter-apk/Alive.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Alive build ${{ github.run_number }}
+          files: build/app/outputs/flutter-apk/Alive.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
