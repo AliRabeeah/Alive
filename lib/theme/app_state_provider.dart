@@ -32,7 +32,8 @@ class AppStateProvider extends ChangeNotifier {
   ];
 
   String randomMotivation() {
-    motivations.shuffle();
-    return motivations.first;
+    final list = List<String>.from(motivations);
+    list.shuffle();
+    return list.first;
   }
 }
