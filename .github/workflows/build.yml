@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  HAS_KEYSTORE: ${{ secrets.ALIVE_KEYSTORE_BASE64 != '' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -46,12 +49,12 @@ jobs:
         run: flutter build apk --release
 
       - name: Decode keystore
-        if: ${{ secrets.ALIVE_KEYSTORE_BASE64 != '' }}
+        if: ${{ env.HAS_KEYSTORE == 'true' }}
         run: |
           echo "${{ secrets.ALIVE_KEYSTORE_BASE64 }}" | base64 --decode > alive_release.keystore
 
       - name: Sign APK
-        if: ${{ secrets.ALIVE_KEYSTORE_BASE64 != '' }}
+        if: ${{ env.HAS_KEYSTORE == 'true' }}
         env:
           KEYSTORE_PASS: ${{ secrets.ALIVE_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ALIVE_KEY_ALIAS }}
@@ -72,7 +75,7 @@ jobs:
           mv $SIGNED build/app/outputs/flutter-apk/Alive.apk
 
       - name: Rename unsigned APK (fallback, no keystore configured)
-        if: ${{ secrets.ALIVE_KEYSTORE_BASE64 == '' }}
+        if: ${{ env.HAS_KEYSTORE != 'true' }}
         run: mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/Alive.apk
 
       - name: Upload APK artifact
